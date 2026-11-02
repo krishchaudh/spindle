@@ -10,6 +10,8 @@ class Config(Parent):
     overrides = {
         "miles_cfg.context_parallel_size": 2,
         "miles_cfg.cli_options.allgather_cp": True,
+        "miles_cfg.dynamic_batch_size": False,
+        "miles_cfg.cli_options.qkv_format": "bshd",
         "sglang_cfg.mem_fraction_static": 0.85,
     }
 
