@@ -12,6 +12,7 @@ from stitch.pools.modal_flash import ModalFlashPool
 
 from spindle.control_plane import ControlPlane, create_control_plane_app
 from spindle.control_plane.keys import model_key, placement_key, trainer_demand_key
+from spindle.control_plane.queues import RECENT_WINDOW_S, prune_queue_events
 from spindle.control_plane.records import ModelRecord
 from spindle.deployments import validate_frontend
 from spindle.inference.sampling import sample_task
@@ -880,6 +881,10 @@ async def _cleanup_lora_pools() -> tuple[str, ...]:
 def cleaner():
     async def run() -> None:
         plane = _plane()
+        try:
+            await prune_queue_events(plane.kv, plane.clock() - RECENT_WINDOW_S)
+        except Exception:
+            logging.getLogger(__name__).exception("prune queue events")
         await plane.sweep_idle_sessions(SESSION_IDLE_TIMEOUT)
         await plane.sweep_idle_models(SESSION_IDLE_TIMEOUT)
         await plane.sweep_idle_engines()
