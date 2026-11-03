@@ -6,6 +6,9 @@ Notable changes to Spindle, following [Keep a Changelog](https://keepachangelog.
 
 ### Added
 
+- `qwen25_7b_instruct_lora_32k`: Qwen2.5-7B-Instruct LoRA with 32K context, trained on 4× H100 and sampled on one GPU per replica.
+- `qwen25_3b_lora_32k`: Qwen2.5-3B LoRA with 32K context, with one model replica per GPU.
+- The shared server serves both.
 - `spindle stop` stops a deployment: its frontend, then every trainer, inference, and sampler app it created. Pass the same `--app` and `--env` as the deploy.
 
 ### Changed
