@@ -388,6 +388,32 @@ def test_multiple_models_same_http_service_and_old_binding_survives_switch():
     asyncio.run(run())
 
 
+def test_queues_report_each_recipe():
+    async def run():
+        async def list_instances():
+            return ()
+
+        plane = ControlPlane(
+            InMemoryKeyValueStore(), SimpleNamespace(list_instances=list_instances)
+        )
+        spec = recipe(trainer_max_instances=3, trainer_max_clients_per_instance=4)
+        app = create_control_plane_app(plane, [resolved(spec)], api_key="test")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://frontend",
+            headers={"x-api-key": "test"},
+        ) as client:
+            response = await client.get("/api/v1/spindle/queues")
+            assert response.status_code == 200, response.text
+            [queue] = response.json()["queues"]
+            assert queue["name"] == spec.name
+            assert queue["backlog"] == {"count": 0, "oldest_age_s": None}
+            assert queue["slots"] == {"used": 0, "free": 0, "per_trainer": 4}
+            assert queue["trainers"] == {"running": 0, "starting": 0, "max": 3}
+
+    asyncio.run(run())
+
+
 def test_native_boolean_opposite_flags_and_optional_value():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bias", dest="bias", action="store_true")

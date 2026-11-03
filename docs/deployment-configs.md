@@ -164,6 +164,21 @@ All configs deployed together must share platform settings. Use a shared parent 
 
 One frontend serves all models through Tinker’s `base_model`. If several recipes serve the same model, requests by model name go to the one with the longest context. To use a specific recipe, pass its name as `base_model`. `get_server_capabilities` lists every recipe and its context length.
 
+`GET /api/v1/spindle/queues` describes each recipe's training queue. Each trainer holds up to `trainer_max_clients_per_instance` training clients, and a recipe runs at most `trainer_max_instances` trainers. New clients are placed first come, first served.
+
+```json
+{"name": "qwen35_2b_lora_32k", "base_model": "Qwen/Qwen3.5-2B", "parameterization": "lora",
+ "backlog": {"count": 1, "oldest_age_s": 42.0},
+ "slots": {"used": 6, "free": 0, "per_trainer": 6},
+ "trainers": {"running": 1, "starting": 1, "max": 4}}
+```
+
+- `backlog` counts training clients waiting for a slot, and how long the oldest has waited.
+- `slots` counts clients on running trainers and the open slots left on them.
+- `trainers` counts trainers that are running, trainers that are still booting, and the most the recipe allows.
+
+A client can start right away when `slots.free` is greater than `backlog.count`. Otherwise it waits for a trainer to boot, or for another client to finish or go idle for `session_idle_timeout_s`. The response can be a few seconds old, so another client can take a free slot first.
+
 ## Update isolation
 
 Trainer apps are named `spindle-trainer-{name}` and inference apps `spindle-inference-{name}`. An inference-only change reuses the trainer app. A trainer-only change reuses the inference app. Source-only upgrades use `--refresh-trainer` / `--refresh-inference`. Updating inference settings also redeploys existing pools for that recipe before publishing the new frontend configuration. An interrupted pool update can be retried with the same command. Changes to region, storage, or secrets refresh both worker apps.
