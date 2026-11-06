@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from dataclasses import asdict
 
@@ -23,7 +25,7 @@ from spindle.providers.contracts import (
 )
 from spindle.startup_timing import StartupTimeline
 from spindle.telemetry.otlp import sample_trace
-from spindle.version import COMMIT_ENV, source_commit
+from spindle.version import COMMIT_ENV, deployment_tag, source_commit
 
 from .app_tags import app_tags
 from .checkpoint_storage import (
@@ -33,6 +35,8 @@ from .checkpoint_storage import (
 from .deployment import trainer_deployment_env
 from .deployment_configs import (
     FRONTEND_SETTINGS_ENV,
+    WORKER_CONFIG_ENV,
+    WORKER_ROLE_ENV,
     frontend_settings_from_env,
 )
 from .engines import EngineInstanceRecord, ModalEnginePlatform
@@ -782,7 +786,125 @@ def server():
         DEPLOYMENTS,
         api_key=os.environ["TINKER_API_KEY"],
         checkpoint_volume=CHECKPOINT_VOLUME_NAME,
+        apps_status=_apps_status,
+        deploy_apps=_start_app_deploy,
+        stop_apps=_stop_apps,
     )
+
+
+APP_DEPLOY_CLAIM_S = 60.0
+
+
+def _app_deploy_key(name: str) -> str:
+    return f"app_deploy:{name}"
+
+
+async def _app_exists(name: str) -> bool | None:
+    """Whether the app is deployed, or None if Modal could not say."""
+    try:
+        await modal.App.lookup.aio(
+            name, environment_name=PLATFORM["modal"]["environment"]
+        )
+    except modal.exception.NotFoundError:
+        return False
+    except Exception:
+        logging.getLogger(__name__).exception("Looking up app %s", name)
+        return None
+    return True
+
+
+async def _apps_status(definition) -> dict[str, str]:
+    names = (definition.trainer_app_name, definition.inference_app_name)
+    found = await asyncio.gather(*(_app_exists(name) for name in names))
+    if all(found):
+        return {"apps": "ready"}
+    if None in found:
+        return {"apps": "unknown"}
+    record = await shared_kv().get(_app_deploy_key(definition.name))
+    if record is None:
+        return {"apps": "missing"}
+    if "error" in record:
+        return {"apps": "failed", "apps_error": record["error"]}
+    if "call_id" not in record:
+        claimed = time.time() - record["claimed_at"] < APP_DEPLOY_CLAIM_S
+        return {"apps": "deploying" if claimed else "missing"}
+    try:
+        running = await _call_running(record["call_id"])
+    except Exception as exc:
+        return {"apps": "failed", "apps_error": str(exc)}
+    return {"apps": "deploying" if running else "missing"}
+
+
+async def _start_app_deploy(definition) -> None:
+    """Deploy a registered config's missing apps in the background, once per name."""
+    if (await _apps_status(definition))["apps"] in {"ready", "deploying", "unknown"}:
+        return
+    kv, key = shared_kv(), _app_deploy_key(definition.name)
+    await kv.delete(key)
+    if not (await kv.put_if_absent(key, {"claimed_at": time.time()})).created:
+        return
+    call = await deploy_apps.spawn.aio(definition.name)
+    await kv.put(key, {"call_id": call.object_id})
+
+
+async def _stop_apps(definition) -> None:
+    await shared_kv().delete(_app_deploy_key(definition.name))
+    for name in (definition.trainer_app_name, definition.inference_app_name):
+        if await _app_exists(name) is not False:
+            await asyncio.to_thread(_stop_app, name)
+
+
+def _stop_app(name: str) -> None:
+    command = [sys.executable, "-m", "modal", "app", "stop", "-y", name]
+    if environment := PLATFORM["modal"]["environment"]:
+        command += ["--env", environment]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if (
+        result.returncode
+        and "App is already stopped." not in result.stdout + result.stderr
+    ):
+        raise RuntimeError(f"stopping {name} failed: {result.stderr[-2000:]}")
+
+
+def _deploy_app(deployment, role: str) -> None:
+    command = [sys.executable, "-m", "modal", "deploy", "--tag", deployment_tag()]
+    if environment := PLATFORM["modal"]["environment"]:
+        command += ["--env", environment]
+    command += ["-m", "spindle.providers.modal.deployment_worker_app"]
+    env = {
+        **os.environ,
+        WORKER_CONFIG_ENV: deployment.model_dump_json(),
+        WORKER_ROLE_ENV: role,
+    }
+    result = subprocess.run(command, env=env, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(
+            f"{role} deploy failed: {(result.stdout + result.stderr)[-2000:]}"
+        )
+
+
+@app.function(image=image, timeout=60 * 60)
+async def deploy_apps(name: str) -> None:
+    """Deploy a registered config's missing trainer and inference apps."""
+    deployment = await module_for(name)
+    try:
+        for role, app_name in (
+            ("trainer", deployment.trainer_app_name),
+            ("inference", deployment.inference_app_name),
+        ):
+            exists = await _app_exists(app_name)
+            if exists is None:
+                raise RuntimeError(f"could not look up {app_name}")
+            if not exists:
+                await asyncio.to_thread(_deploy_app, deployment, role)
+    except Exception as exc:
+        await shared_kv().put(
+            _app_deploy_key(name),
+            {"call_id": modal.current_function_call_id(), "error": str(exc)},
+        )
+        raise
+    await shared_kv().delete(_app_deploy_key(name))
+    await _start_weights_download(name)
 
 
 async def _lose_undefined_models() -> tuple[str, ...]:
