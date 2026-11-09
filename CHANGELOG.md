@@ -4,6 +4,14 @@ Notable changes to Spindle, following [Keep a Changelog](https://keepachangelog.
 
 ## Unreleased
 
+### Added
+
+- `mis`, `score_centered`, and `score_centered_mis` train on recorded sampler supports in Miles LoRA and Megatron full-parameter backends. Replay requires explicit sampling temperature; omitted weights mask prompt positions in both backends.
+
+### Changed
+
+- Replay training prepares expert routes and top-p supports with arrays, reducing CPU work before training.
+
 ## 0.1.6 - 2026-11-06
 
 Add and remove configs on a running frontend without redeploying it, wait in line for a trainer slot instead of failing, and see each recipe's training queue.
