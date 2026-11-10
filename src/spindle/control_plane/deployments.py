@@ -80,7 +80,7 @@ class FrontendSettings:
     @classmethod
     def from_recipe(cls, recipe: BaseConfig) -> FrontendSettings:
         return cls(
-            platform=recipe.platform,
+            platform=recipe.platform,  # ty: ignore[invalid-argument-type]
             **{field: getattr(recipe, field) for field in FRONTEND_FIELDS},
         )
 
@@ -238,7 +238,7 @@ class DeploymentRoutes:
         """Compile a request into a config under this frontend's settings."""
         recipe = request.recipe
         if recipe is None:
-            parent = await self.get(request.base)
+            parent = await self.get(request.base)  # ty: ignore[invalid-argument-type]
             if not isinstance(parent, DeploymentConfig):
                 raise ValueError("unknown base deployment")
             recipe = vars(parent.recipe)
