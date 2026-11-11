@@ -1,0 +1,64 @@
+name: Core CPU tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Run the newest Tinker SDK release as a canary that flags protocol drift
+    # without blocking merges, because Spindle does not cap the SDK version.
+    continue-on-error: ${{ matrix.tinker == 'latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The package's minimum Tinker SDK, the release the server images pin,
+        # and the newest release.
+        tinker: ["0.26.0", "image-pin", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --lib --locked --manifest-path rust/router/Cargo.toml
+      - run: python -m pip install uv==0.9.26
+      - run: uv sync --locked --python 3.12
+      # ty checks the patches against the real upstream signatures, so the
+      # pinned packages being patched must resolve: Miles at MILES_COMMIT,
+      # Megatron-Bridge at BRIDGE_COMMIT (host_syncs.py, matching the Miles
+      # Dockerfile pin), and Megatron-LM at the commit in Miles' release lock.
+      - name: Install the pinned upstream sources Spindle patches
+        run: |
+          miles=$(sed -n 's/^MILES_COMMIT = "\(.*\)"$/\1/p' src/spindle/providers/modal/miles_image.py)
+          bridge=$(sed -n 's/^BRIDGE_COMMIT = "\(.*\)"$/\1/p' src/spindle/backends/miles_runtime/host_syncs.py)
+          megatron=$(curl -sL "https://raw.githubusercontent.com/modal-projects/miles/$miles/release-lock.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["megatron_commit"])')
+          test -n "$miles" && test -n "$bridge" && test -n "$megatron"
+          uv pip install --python .venv/bin/python --no-deps "git+https://github.com/modal-projects/miles.git@$miles"
+          uv pip install --python .venv/bin/python --no-deps "git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@$bridge"
+          uv pip install --python .venv/bin/python --no-deps "git+https://github.com/radixark/Megatron-LM.git@$megatron"
+      - run: uv run pre-commit run --all-files --show-diff-on-failure
+      # Runtime GPU dependencies live in the Modal image. Use CPU tensors here
+      # so the loss, gradient, and FP32-head regressions also run in CI.
+      - run: uv pip install --python .venv/bin/python torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: uv run --no-sync ty check
+      # The CPU tests stub megatron when it is absent (runtime_stubs); the
+      # pinned megatron family is needed only for the ty step above, and its
+      # GPU-only import chain (triton, transformer-engine) breaks collection.
+      # Miles stays installed: the patching fixture checks resolve its types.
+      - run: uv pip uninstall --python .venv/bin/python megatron-bridge megatron-core
+      - name: Install the Tinker SDK under test
+        run: |
+          case "${{ matrix.tinker }}" in
+            latest) requirement="tinker" ;;
+            image-pin) requirement=$(sed -n 's/^TINKER_PACKAGE = "\(.*\)"$/\1/p' src/spindle/providers/modal/image_dependencies.py) ;;
+            *) requirement="tinker==${{ matrix.tinker }}" ;;
+          esac
+          test -n "$requirement"
+          uv pip install --python .venv/bin/python "$requirement" --upgrade-package tinker
+      # The router extension runs only in the Modal image; its tests need it locally.
+      - run: uv pip install --python .venv/bin/python ./rust/router
+      - run: uv run --no-sync pytest -q
+      - run: uv build
