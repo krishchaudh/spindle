@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 from functools import wraps
+from typing import TYPE_CHECKING
 from math import prod
 
 import numpy as np
 
 from spindle.backends.score_centering import has_duplicate_tokens
+from spindle.patching import patch
 from spindle.replay import REPLAY_FIELDS
+
+if TYPE_CHECKING:
+    from ._upstream import ConversionModule, TinkerRuntimeModule
 
 _replay_builder = None
 _sharded_package = None
 
 
-def install_distribution_sharding(conversion):
+def install_distribution_sharding(conversion: ConversionModule):
     """Keep support logprobs aligned when Miles partitions a rollout batch."""
     global _sharded_package
     original = getattr(conversion, "_package_shards", None)
@@ -35,7 +40,7 @@ def install_distribution_sharding(conversion):
         return shards
 
     _sharded_package = package
-    conversion._package_shards = package
+    patch(original, owner=conversion)(package)
 
 
 def replay_row(inputs, targets: np.ndarray) -> dict:
@@ -232,7 +237,7 @@ def add_replay_to_train_data(train_data: dict, datums: list[dict]) -> None:
         ]
 
 
-def install_bridge_replay(runtime) -> None:
+def install_bridge_replay(runtime: TinkerRuntimeModule) -> None:
     global _replay_builder
     original = runtime._build_train_data
     if original is _replay_builder:
@@ -244,7 +249,7 @@ def install_bridge_replay(runtime) -> None:
         return result
 
     _replay_builder = build
-    runtime._build_train_data = build
+    patch(original, owner=runtime)(build)
     spec = vars(runtime).get("ROLLOUT_DATA_VALUE_SPEC")
     if (
         isinstance(spec, dict)

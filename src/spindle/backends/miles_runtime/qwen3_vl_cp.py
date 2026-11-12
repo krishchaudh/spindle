@@ -9,11 +9,19 @@ Megatron-Bridge accepts pre-sharded rows only with explicit 3D
 from __future__ import annotations
 
 from functools import wraps
+from typing import TYPE_CHECKING
+
+from spindle.patching import patch
+
+if TYPE_CHECKING:
+    from ._upstream import BridgeModelModule, MilesQwen3VLModule
 
 _INSTALLED = "_spindle_cp_position_ids"
 
 
-def install_qwen3_vl_cp_position_ids(*, bridge_model, miles_qwen3_vl) -> None:
+def install_qwen3_vl_cp_position_ids(
+    *, bridge_model: BridgeModelModule, miles_qwen3_vl: MilesQwen3VLModule
+) -> None:
     model_cls = bridge_model.Qwen3VLModel
     forward = model_cls.forward
     if getattr(forward, _INSTALLED, False):
@@ -30,4 +38,4 @@ def install_qwen3_vl_cp_position_ids(*, bridge_model, miles_qwen3_vl) -> None:
         return forward(self, *args, **kwargs)
 
     setattr(forward_with_positions, _INSTALLED, True)
-    model_cls.forward = forward_with_positions
+    patch(forward, owner=model_cls)(forward_with_positions)

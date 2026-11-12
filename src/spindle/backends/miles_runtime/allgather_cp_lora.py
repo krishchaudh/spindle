@@ -5,7 +5,16 @@ so the row's adapter gets that chunk's length in tokens.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import torch
+
+from spindle.patching import patch
+
+if TYPE_CHECKING:
+    from miles.backends.training_utils.data import DataIterator
+
+    from ._upstream import MegatronModelModule
 
 
 class _SlotlessIterator:
@@ -24,7 +33,7 @@ class _SlotlessIterator:
         return getattr(self._inner, name)
 
 
-def install(megatron_model) -> None:
+def install(megatron_model: MegatronModelModule) -> None:
     original = megatron_model.get_batch
     if getattr(original, "__spindle_allgather_cp_lora__", False):
         return
@@ -36,7 +45,15 @@ def install(megatron_model) -> None:
                 data_iterator, keys, *args, allgather_cp=allgather_cp, **kwargs
             )
         wrapped = _SlotlessIterator(data_iterator)
-        batch = original(wrapped, keys, *args, allgather_cp=allgather_cp, **kwargs)
+        # Miles duck-types the iterator (get_next / rollout_data); the wrapper
+        # intentionally is not a DataIterator.
+        batch = original(
+            cast("DataIterator", wrapped),
+            keys,
+            *args,
+            allgather_cp=allgather_cp,
+            **kwargs,
+        )
         if wrapped.slots is not None:
             tokens = batch["tokens"]
             counts = torch.zeros(
@@ -51,4 +68,4 @@ def install(megatron_model) -> None:
         return batch
 
     get_batch.__spindle_allgather_cp_lora__ = True
-    megatron_model.get_batch = get_batch
+    patch(original, owner=megatron_model)(get_batch)

@@ -13,8 +13,15 @@ import shutil
 import socket
 from pathlib import Path
 
+from typing import TYPE_CHECKING, Any
+
 import modal
 import torch.distributed as dist
+
+from spindle.patching import patch
+
+if TYPE_CHECKING:
+    from ._upstream import CheckpointIoModule
 
 
 def _checkpoint_volume_path(path: Path) -> str | None:
@@ -83,7 +90,9 @@ def _write_checkpoint_dir_on_volume(
     sync_checkpoint_volume("commit")
 
 
-def install_cross_node_checkpoint_publish(checkpoint_io, *dependents) -> None:
+def install_cross_node_checkpoint_publish(
+    checkpoint_io: CheckpointIoModule, *dependents: Any
+) -> None:
     """Publish checkpoint shards that are spread across nodes.
 
     Miles writes shards to a temp dir and has rank 0 rename it into place. On a
@@ -113,10 +122,7 @@ def install_cross_node_checkpoint_publish(checkpoint_io, *dependents) -> None:
         )
 
     write_checkpoint_dir.__spindle_publishes_across_nodes__ = True
-    checkpoint_io.write_checkpoint_dir = write_checkpoint_dir
-    for module in dependents:
-        if getattr(module, "write_checkpoint_dir", None) is original:
-            module.write_checkpoint_dir = write_checkpoint_dir
+    patch(original, owner=checkpoint_io, dependents=dependents)(write_checkpoint_dir)
 
 
 def _node_identity() -> str:

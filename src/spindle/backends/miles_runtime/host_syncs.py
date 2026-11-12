@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 import inspect
 import os
 from functools import wraps
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 import torch.nn.functional as F
+
+from spindle.patching import patch
+
+if TYPE_CHECKING:
+    from ._upstream import FusedBiasGegluModule, MultiLoraLayersModule
 
 ENV_FLAG = "SPINDLE_HOST_SYNC_PATCHES"
 BRIDGE_COMMIT = "8cd3466d14d2337c8492827b3712482c2b3e4866"
@@ -39,7 +46,7 @@ def bridge_commit() -> str | None:
     return BRIDGE_COMMIT if digest == MULTI_LORA_SOURCE_SHA256 else None
 
 
-def install_multi_lora(layers=None) -> bool:
+def install_multi_lora(layers: MultiLoraLayersModule | None = None) -> bool:
     """Patch ``megatron.bridge.peft.multi_lora_layers`` (or ``layers``)."""
     if layers is None:
         commit = bridge_commit()
@@ -50,12 +57,17 @@ def install_multi_lora(layers=None) -> bool:
                 reason=f"megatron-bridge {commit} != {BRIDGE_COMMIT}",
             )
             return False
-        from megatron.bridge.peft import multi_lora_layers as layers
+        from megatron.bridge.peft import multi_lora_layers as _layers
+
+        layers = _layers
     if getattr(layers, _INSTALLED, False):
         return True
 
     dense, expert = layers.MultiLoRALinear, layers.MultiLoRAGroupedExpertLinear
-    init_slot, clear_slot = dense.init_adapter_slot, dense.clear_adapter_slot
+    # Class-level method access yields both the bound and raw-function views;
+    # the casts pin the exact upstream signatures (protocol-checked above).
+    init_slot = cast("Callable[[Any, int, int, float], None]", dense.init_adapter_slot)
+    clear_slot = cast("Callable[[Any, int], None]", dense.clear_adapter_slot)
 
     @wraps(init_slot)
     def init_adapter_slot(self, idx, rank, alpha):
@@ -68,26 +80,27 @@ def install_multi_lora(layers=None) -> bool:
         clear_slot(self, idx)
         _unit_scaling(self).pop(idx, None)
 
-    dense.init_adapter_slot = init_adapter_slot
-    dense.clear_adapter_slot = clear_adapter_slot
-    dense.forward = _dense_forward(layers)
-    expert.forward = _expert_forward()
+    patch(init_slot, owner=dense)(init_adapter_slot)
+    patch(clear_slot, owner=dense)(clear_adapter_slot)
+    patch(dense.forward, owner=dense)(_dense_forward(layers))
+    patch(expert.forward, owner=expert)(_expert_forward())
     # install_moe_slot_routing looks this up when the model is built.
-    layers._make_slot_routing_hook = _routing_hook_factory(layers)
+    patch(layers._make_slot_routing_hook, owner=layers)(_routing_hook_factory(layers))
     setattr(layers, _INSTALLED, True)
     _log("installed", patch="multi_lora", bridge=BRIDGE_COMMIT[:8])
     return True
 
 
-def install_geglu(fused=None, experts=None) -> bool:
+def install_geglu(fused: FusedBiasGegluModule | None = None, experts=None) -> bool:
     """Cache the GeGLU offset tensor in ``megatron.core``'s weighted quick-GeGLU."""
     if fused is None:
         try:
-            from megatron.core.fusions import fused_bias_geglu as fused
+            from megatron.core.fusions import fused_bias_geglu as _fused
             from megatron.core.transformer.moe import experts
         except ImportError as exc:
             _log("skipped", patch="geglu", reason=type(exc).__name__)
             return False
+        fused = _fused
     original = fused.weighted_bias_quick_geglu_impl
     if getattr(original, _INSTALLED, False):
         return True
@@ -96,12 +109,11 @@ def install_geglu(fused=None, experts=None) -> bool:
         _log("skipped", patch="geglu", reason=f"source sha256 {digest[:12]} differs")
         return False
     patched = _geglu(fused)
-    fused.weighted_bias_quick_geglu_impl = patched
-    if (
-        experts is not None
-        and getattr(experts, "weighted_bias_quick_geglu_impl", None) is original
-    ):
-        experts.weighted_bias_quick_geglu_impl = patched
+    patch(
+        original,
+        owner=fused,
+        dependents=(experts,) if experts is not None else (),
+    )(patched)
     _log("installed", patch="geglu")
     return True
 
