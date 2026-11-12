@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
 import inspect
 import os
 from functools import wraps
-from typing import TYPE_CHECKING, Any, cast
 
 import torch
 import torch.nn.functional as F
 
 from spindle.patching import patch
-
-if TYPE_CHECKING:
-    from ._upstream import FusedBiasGegluModule, MultiLoraLayersModule
 
 ENV_FLAG = "SPINDLE_HOST_SYNC_PATCHES"
 BRIDGE_COMMIT = "8cd3466d14d2337c8492827b3712482c2b3e4866"
@@ -46,7 +41,7 @@ def bridge_commit() -> str | None:
     return BRIDGE_COMMIT if digest == MULTI_LORA_SOURCE_SHA256 else None
 
 
-def install_multi_lora(layers: MultiLoraLayersModule | None = None) -> bool:
+def install_multi_lora(layers=None) -> bool:
     """Patch ``megatron.bridge.peft.multi_lora_layers`` (or ``layers``)."""
     if layers is None:
         commit = bridge_commit()
@@ -57,17 +52,12 @@ def install_multi_lora(layers: MultiLoraLayersModule | None = None) -> bool:
                 reason=f"megatron-bridge {commit} != {BRIDGE_COMMIT}",
             )
             return False
-        from megatron.bridge.peft import multi_lora_layers as _layers
-
-        layers = _layers
+        from megatron.bridge.peft import multi_lora_layers as layers
     if getattr(layers, _INSTALLED, False):
         return True
 
     dense, expert = layers.MultiLoRALinear, layers.MultiLoRAGroupedExpertLinear
-    # Class-level method access yields both the bound and raw-function views;
-    # the casts pin the exact upstream signatures (protocol-checked above).
-    init_slot = cast("Callable[[Any, int, int, float], None]", dense.init_adapter_slot)
-    clear_slot = cast("Callable[[Any, int], None]", dense.clear_adapter_slot)
+    init_slot, clear_slot = dense.init_adapter_slot, dense.clear_adapter_slot
 
     @wraps(init_slot)
     def init_adapter_slot(self, idx, rank, alpha):
@@ -91,16 +81,15 @@ def install_multi_lora(layers: MultiLoraLayersModule | None = None) -> bool:
     return True
 
 
-def install_geglu(fused: FusedBiasGegluModule | None = None, experts=None) -> bool:
+def install_geglu(fused=None, experts=None) -> bool:
     """Cache the GeGLU offset tensor in ``megatron.core``'s weighted quick-GeGLU."""
     if fused is None:
         try:
-            from megatron.core.fusions import fused_bias_geglu as _fused
+            from megatron.core.fusions import fused_bias_geglu as fused
             from megatron.core.transformer.moe import experts
         except ImportError as exc:
             _log("skipped", patch="geglu", reason=type(exc).__name__)
             return False
-        fused = _fused
     original = fused.weighted_bias_quick_geglu_impl
     if getattr(original, _INSTALLED, False):
         return True

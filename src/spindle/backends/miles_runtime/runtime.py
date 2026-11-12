@@ -12,7 +12,7 @@ from contextlib import contextmanager, suppress
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import torch
@@ -21,9 +21,6 @@ from spindle.backends.miles_arguments import defer_config_overrides
 from spindle.backends.miles_config import MilesBackendConfig
 from spindle.patching import patch
 from spindle.errors import BackendFailed
-
-if TYPE_CHECKING:
-    from ._upstream import LoraArgumentsModule, TrainSpecsModule
 from spindle.startup_timing import BACKEND_COMPONENT, timeline
 
 from .replay_data import install_bridge_replay, validate_routed_experts
@@ -471,7 +468,7 @@ def _main_process_identity():
     return process_identity.SimpleProcessIdentity(component="main")
 
 
-def _configure_actor_spec(train_specs: TrainSpecsModule) -> None:
+def _configure_actor_spec(train_specs) -> None:
     original = train_specs._compute_spec_trainer
     if getattr(original, "_spindle_actor_spec", False):
         return
@@ -494,7 +491,7 @@ def _configure_actor_spec(train_specs: TrainSpecsModule) -> None:
     patch(original, owner=train_specs)(compute)
 
 
-def _allow_allgather_cp_bshd_multi_lora(lora_arguments: LoraArgumentsModule) -> None:
+def _allow_allgather_cp_bshd_multi_lora(lora_arguments) -> None:
     """Miles rejects multi-LoRA with all-gather CP. With bshd rows the actor's
     allgather_cp_lora patch counts each adapter's tokens, so skip that check."""
     original = lora_arguments.validate_multi_lora_args
@@ -516,7 +513,7 @@ def _allow_allgather_cp_bshd_multi_lora(lora_arguments: LoraArgumentsModule) -> 
     patch(original, owner=lora_arguments)(validate)
 
 
-def _allow_context_parallel_multi_lora(lora_arguments: LoraArgumentsModule) -> None:
+def _allow_context_parallel_multi_lora(lora_arguments) -> None:
     """Miles v0.1.1 rejects multi-LoRA with CP>1 because its Tinker losses zip
     full-length per-datum vectors against CP-sharded log probs. The Spindle actor
     gathers those log probs back to full response length before the loss runs,
@@ -527,6 +524,17 @@ def _allow_context_parallel_multi_lora(lora_arguments: LoraArgumentsModule) -> N
 
     @wraps(original)
     def validate(args) -> None:
+        estimator = getattr(args, "advantage_estimator", None)
+        if args.context_parallel_size > 1 and estimator in (
+            "ppo",
+            "reinforce_plus_plus",
+        ):
+            raise ValueError(
+                "multi-LoRA with context parallelism does not support "
+                f"--advantage-estimator {estimator} on Miles v0.1.1: its math_utils "
+                "slices would silently produce full-length advantages. Set "
+                "--context-parallel-size 1 or change --advantage-estimator."
+            )
         context_parallel_size = args.context_parallel_size
         args.context_parallel_size = 1
         try:

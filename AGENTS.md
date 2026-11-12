@@ -13,13 +13,7 @@ These rules apply to everyone who changes this repo, people and coding agents al
 - Put imports at the top of the file. Import inside a function only when the dependency is missing where the module gets imported (for example, a GPU-only package in a module that CPU tests import), and say why in one short comment.
 - Make the code explain itself. Before you add a comment, try a clearer name, an extracted variable or a simpler structure. Keep a comment only when it says something the code can't, such as a non-obvious constraint or an upstream bug, and keep it to one line. Put the reasoning behind a change in the commit message or the PR description.
 - Keep changes small. Reuse existing helpers instead of adding new ones. Remove dead branches, unused constants and flags left over from a refactor.
-- Monkeypatch a pinned upstream function only through `spindle.patching.patch`:
-
-  ```python
-  patch(upstream_module.fn, owner=upstream_module, dependents=(...))(replacement)
-  ```
-
-  The helper binds the replacement to the upstream signature, so ty fails the build when a pinned upstream signature drifts. The check only works where ty sees the real package: install the patched package at its pinned commit in CI. When an installer receives the upstream module as a parameter (so tests can inject fakes), annotate it with the matching protocol from `spindle.backends.miles_runtime._upstream`; the trip-wire assignments there fail ty when a pin bump changes a member Spindle relies on.
+- Monkeypatch pinned upstream functions through `spindle.patching.patch`.
 - Don't delete existing comments or docstrings that a change doesn't touch.
 
 ## Tests

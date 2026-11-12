@@ -8,24 +8,12 @@ from __future__ import annotations
 
 from argparse import Namespace
 from functools import wraps
-from typing import TYPE_CHECKING, cast
 
 import torch
 
 from spindle.patching import patch
 
 from .targets import install_multi_target_hooks
-
-if TYPE_CHECKING:
-    from miles.utils.sampling_mask import RolloutSamplingMask
-
-    from ._upstream import (
-        LogitProcessorsModule,
-        LoraModelModule,
-        MathUtilsModule,
-        MegatronModelModule,
-        TinkerLossesModule,
-    )
 
 _replayed_run = None
 
@@ -68,13 +56,13 @@ def build_tinker_sampling_mask(
 
 def install_replay_hooks(
     *,
-    megatron_model: MegatronModelModule,
-    lora_model: LoraModelModule,
-    logit_processors: LogitProcessorsModule,
-    tinker_losses: TinkerLossesModule,
+    megatron_model,
+    lora_model,
+    logit_processors,
+    tinker_losses,
     fill_replay_data,
     manager,
-    math_utils: MathUtilsModule | None = None,
+    math_utils=None,
 ) -> None:
     # The GPU actor imports Miles; this module also serves CPU-side mask tests.
     global _replayed_run
@@ -94,15 +82,15 @@ def install_replay_hooks(
     original_batch = megatron_model.get_batch
 
     @wraps(original_batch)
-    def get_batch(data_iterator, keys, *args, **kwargs):
+    def get_batch(iterator, keys, *args, **kwargs):
         for key in (
             "rollout_sampling_mask_ids",
             "rollout_sampling_mask_offsets",
             "rollout_sampling_mask_logprobs",
         ):
-            if key in data_iterator.rollout_data and key not in keys:
+            if key in iterator.rollout_data and key not in keys:
                 keys = [*keys, key]
-        return original_batch(data_iterator, keys, *args, **kwargs)
+        return original_batch(iterator, keys, *args, **kwargs)
 
     patch(original_batch, owner=megatron_model)(get_batch)
     original_target = tinker_losses._target_logprobs
@@ -147,10 +135,7 @@ def install_replay_hooks(
             response_lengths=batch["response_lengths"],
             with_entropy=False,
             max_seq_lens=batch.get("max_seq_lens"),
-            # Miles duck-types sampling masks; TinkerSamplingMask mirrors the
-            # RolloutSamplingMask CSR surface but allows empty rows, so it is
-            # not a subclass of the frozen dataclass.
-            rollout_sampling_mask=cast("list[RolloutSamplingMask]", masks),
+            rollout_sampling_mask=masks,
         )["log_probs"]
 
     patch(original_target, owner=tinker_losses)(target_logprobs)

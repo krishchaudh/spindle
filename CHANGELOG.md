@@ -6,6 +6,8 @@ Notable changes to Spindle, following [Keep a Changelog](https://keepachangelog.
 
 ### Added
 
+- Multi-LoRA training rejects `--advantage-estimator ppo` and `reinforce_plus_plus` with context parallelism above 1 at startup: on Miles v0.1.1 that combination would silently train on full-length advantages. The error says to set `--context-parallel-size 1` or change the estimator.
+
 - GLM-5.3 Flash LoRA recipes with a model-specific Miles image, including single-node B300 training with RDMA and expert-routing replay.
 
 - `mis`, `score_centered`, and `score_centered_mis` train on recorded sampler supports in Miles LoRA and Megatron full-parameter backends. Replay requires explicit sampling temperature; omitted weights mask prompt positions in both backends.
