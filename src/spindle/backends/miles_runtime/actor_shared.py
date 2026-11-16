@@ -11,6 +11,7 @@ from torch.distributed.constants import default_pg_timeout
 from miles.ray import train_actor
 from miles.utils import distributed_utils
 
+from spindle.patching import patch
 from spindle.startup_timing import timeline
 
 from .profiling import RankProfiler, TorchProfileConfig
@@ -60,7 +61,7 @@ def use_distributed_timeout_for_gloo(minutes: int) -> None:
             )
         return distributed_utils.GLOO_GROUP
 
-    train_actor.init_gloo_group = init_gloo_group
+    patch(train_actor.init_gloo_group, owner=train_actor)(init_gloo_group)
 
 
 def mark_actor_initialized() -> None:

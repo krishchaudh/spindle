@@ -1,32 +1,32 @@
-"""patch() re-points dependent modules only while they still refer to the
-original."""
-
-import sys
 from types import ModuleType
 
 from spindle.patching import patch
 
 
-def _module(name: str, source: str) -> ModuleType:
+def _module(name: str, **attributes: object) -> ModuleType:
     module = ModuleType(name)
-    exec(source, module.__dict__)
-    sys.modules[name] = module
+    vars(module).update(attributes)
     return module
 
 
 def test_dependents_repointed_only_while_bound_to_original() -> None:
-    upstream = _module("fake_upstream_deps", "def f():\n    return 1\n")
-    stale = _module("fake_dep_stale", "")
-    stale.f = upstream.f
-    drifted = _module("fake_dep_drifted", "")
-    drifted.f = lambda: "local"
-    empty = _module("fake_dep_empty", "")
+    def f() -> int:
+        return 1
 
-    def new():
+    def new() -> int:
         return 2
 
-    patch(upstream.f, dependents=(stale, drifted, empty))(new)  # type: ignore[attr-defined]
+    def local() -> int:
+        return 3
 
-    assert stale.f is new
-    assert drifted.f() == "local"
-    assert not hasattr(empty, "f")
+    upstream = _module("upstream", f=f)
+    stale = _module("stale", f=f)
+    drifted = _module("drifted", f=local)
+    empty = _module("empty")
+
+    patch(f, owner=upstream, dependents=(stale, drifted, empty))(new)
+
+    assert vars(upstream)["f"] is new
+    assert vars(stale)["f"] is new
+    assert vars(drifted)["f"] is local
+    assert "f" not in vars(empty)

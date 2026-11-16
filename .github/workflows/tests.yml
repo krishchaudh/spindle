@@ -65,4 +65,8 @@ jobs:
           uv pip install --python .venv/bin/python --no-deps "git+https://github.com/modal-projects/miles.git@$miles"
           uv pip install --python .venv/bin/python --no-deps "git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@$bridge"
           uv pip install --python .venv/bin/python --no-deps "git+https://github.com/radixark/Megatron-LM.git@$megatron"
-      - run: uv run --no-sync ty check
+      # The v0.2.0 modules target a newer Miles than MILES_COMMIT, so skip them here.
+      - run: >-
+          uv run --no-sync ty check
+          --exclude src/spindle/backends/miles_runtime/v020.py
+          --exclude src/spindle/backends/miles_runtime/actor_v020.py
