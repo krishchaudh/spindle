@@ -19,7 +19,6 @@ import torch
 
 from spindle.backends.miles_arguments import defer_config_overrides
 from spindle.backends.miles_config import MilesBackendConfig
-from spindle.patching import same_signature
 from spindle.errors import BackendFailed
 from spindle.startup_timing import BACKEND_COMPONENT, timeline
 
@@ -514,7 +513,6 @@ def _configure_actor_spec(train_specs) -> None:
     if getattr(original, "_spindle_actor_spec", False):
         return
 
-    @same_signature(original)
     @wraps(original)
     def compute(*args, **kwargs):
         spec = original(*args, **kwargs)
@@ -540,7 +538,6 @@ def _allow_allgather_cp_bshd_multi_lora(lora_arguments) -> None:
     if getattr(original, "__spindle_allows_allgather_bshd__", False):
         return
 
-    @same_signature(original)
     @wraps(original)
     def validate(args) -> None:
         allgather_cp = getattr(args, "allgather_cp", False)
@@ -565,7 +562,6 @@ def _allow_context_parallel_multi_lora(lora_arguments) -> None:
     if getattr(original, "__spindle_allows_cp__", False):
         return
 
-    @same_signature(original)
     @wraps(original)
     def validate(args) -> None:
         estimator = getattr(args, "advantage_estimator", None)
@@ -574,10 +570,9 @@ def _allow_context_parallel_multi_lora(lora_arguments) -> None:
             "reinforce_plus_plus",
         ):
             raise ValueError(
-                "multi-LoRA with context parallelism does not support "
-                f"--advantage-estimator {estimator} on Miles v0.1.1: its math_utils "
-                "slices would silently produce full-length advantages. Set "
-                "--context-parallel-size 1 or change --advantage-estimator."
+                f"--advantage-estimator {estimator} has no effect on multi-LoRA "
+                "training, and Spindle doesn't support it with context parallelism "
+                "above 1. Remove the flag or set --context-parallel-size 1."
             )
         context_parallel_size = args.context_parallel_size
         args.context_parallel_size = 1

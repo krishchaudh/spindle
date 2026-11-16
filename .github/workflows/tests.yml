@@ -51,12 +51,7 @@ jobs:
       - run: uv pip install --python .venv/bin/python ./rust/router
       - run: uv run --no-sync pytest -q
       - run: uv build
-      # ty checks the patches against the real upstream signatures, so the
-      # pinned packages being patched must resolve: Miles at MILES_COMMIT,
-      # Megatron-Bridge at BRIDGE_COMMIT (host_syncs.py, matching the Miles
-      # Dockerfile pin), and Megatron-LM at the commit in Miles' release lock.
-      # Installed after the tests so they never see megatron; no uninstall.
-      # The pins don't depend on the Tinker SDK, so check them once, on the locked SDK.
+      # Type-check same_signature replacements against the pinned upstream sources.
       - name: Install the pinned upstream sources Spindle patches
         if: matrix.tinker == '0.26.0'
         run: |
@@ -67,7 +62,7 @@ jobs:
           uv pip install --python .venv/bin/python --no-deps "git+https://github.com/modal-projects/miles.git@$miles"
           uv pip install --python .venv/bin/python --no-deps "git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@$bridge"
           uv pip install --python .venv/bin/python --no-deps "git+https://github.com/radixark/Megatron-LM.git@$megatron"
-      # The v0.2.0 modules target a newer Miles than MILES_COMMIT, so skip them here.
+      # The v0.2.0 modules need a newer Miles than MILES_COMMIT.
       - if: matrix.tinker == '0.26.0'
         run: >-
           uv run --no-sync ty check

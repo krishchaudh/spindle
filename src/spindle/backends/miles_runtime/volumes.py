@@ -16,8 +16,6 @@ from pathlib import Path
 import modal
 import torch.distributed as dist
 
-from spindle.patching import same_signature
-
 
 def _checkpoint_volume_path(path: Path) -> str | None:
     """Locate ``path`` inside the checkpoint volume, or ``None`` if outside."""
@@ -98,7 +96,6 @@ def install_cross_node_checkpoint_publish(checkpoint_io, *dependents) -> None:
     if getattr(original, "__spindle_publishes_across_nodes__", False):
         return
 
-    @same_signature(original)
     def write_checkpoint_dir(path, write_shards, metadata=None, **kwargs):
         name = os.environ.get("SPINDLE_CHECKPOINT_VOLUME")
         checkpoint_path = Path(path)

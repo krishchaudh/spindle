@@ -10,7 +10,6 @@ from argparse import Namespace
 from functools import wraps
 
 import torch
-from spindle.patching import same_signature
 
 from .targets import install_multi_target_hooks
 
@@ -70,7 +69,6 @@ def install_replay_hooks(
 
     original_mask = logit_processors.build_local_sampling_mask
 
-    @same_signature(original_mask)
     @wraps(original_mask)
     def local_mask(logits, sampling_mask, response_indices, *, tp_rank):
         return build_tinker_sampling_mask(
@@ -81,7 +79,6 @@ def install_replay_hooks(
 
     original_batch = megatron_model.get_batch
 
-    @same_signature(original_batch)
     @wraps(original_batch)
     def get_batch(iterator, keys, *args, **kwargs):
         for key in (
@@ -96,7 +93,6 @@ def install_replay_hooks(
     megatron_model.get_batch = get_batch
     original_target = tinker_losses._target_logprobs
 
-    @same_signature(original_target)
     @wraps(original_target)
     def target_logprobs(args, batch, logits):
         if "rollout_sampling_mask_ids" not in batch:
@@ -144,7 +140,6 @@ def install_replay_hooks(
     install_multi_target_hooks(tinker_losses, math_utils)
     original_iterator = lora_model.get_data_iterator
 
-    @same_signature(original_iterator)
     @wraps(original_iterator)
     def get_iterator(args, model, rollout_data):
         iterators, num_microbatches = original_iterator(args, model, rollout_data)
@@ -166,7 +161,6 @@ def install_replay_hooks(
     lora_model.get_data_iterator = get_iterator
     original_run = lora_model.run_forward_backward
 
-    @same_signature(original_run)
     @wraps(original_run)
     def run(args, batch_id, model, *batch_args, **kwargs):
         rollout_data = batch_args[-1]

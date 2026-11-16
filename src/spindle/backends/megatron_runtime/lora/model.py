@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from megatron.bridge.peft.multi_lora import MultiLoRA
 from megatron.bridge.peft.multi_lora_layers import expose_adapter_slot
@@ -24,7 +26,7 @@ def create_model_and_optimizer(config: EngineModelConfig):
         source_ties_embeddings and not needs_separate_output
     )
 
-    multi_lora_kwargs = {
+    multi_lora_kwargs: dict[str, Any] = {
         "target_modules": list(config.target_modules),
         "n_adapters": config.max_lora_slots,
         "dim": config.max_lora_rank,
@@ -35,7 +37,7 @@ def create_model_and_optimizer(config: EngineModelConfig):
         "split_gdn": config.split_gdn,
         "split_mamba": config.split_mamba,
     }
-    provider.register_pre_wrap_hook(MultiLoRA(**multi_lora_kwargs))  # ty: ignore[invalid-argument-type]
+    provider.register_pre_wrap_hook(MultiLoRA(**multi_lora_kwargs))
 
     provider.finalize()
     model = distributed_model(provider, config, distributed_optimizer=False)
