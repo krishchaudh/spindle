@@ -4,10 +4,6 @@ Notable changes to Spindle, following [Keep a Changelog](https://keepachangelog.
 
 ## Unreleased
 
-### Added
-
-- Multi-LoRA training rejects `--advantage-estimator ppo` and `reinforce_plus_plus` with context parallelism above 1 at startup: on Miles v0.1.1 that combination would silently train on full-length advantages. The error says to set `--context-parallel-size 1` or change the estimator.
-
 ## 0.1.7 - 2026-11-15
 
 See what each run or team costs on a shared deployment: Spindle records the tokens every session uses, serves them through Tinker's `get_billing_usage`, and `spindle usage` turns them into dollars per run or label. See [Cost attribution](docs/cost-attribution.md).

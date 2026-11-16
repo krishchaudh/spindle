@@ -9,8 +9,7 @@ from functools import wraps
 
 import torch
 import torch.distributed as dist
-
-from spindle.patching import patch
+from spindle.patching import same_signature
 
 
 class CandidateLogProbs(torch.autograd.Function):
@@ -44,7 +43,7 @@ class CandidateLogProbs(torch.autograd.Function):
         return picked - sum_exp.log()
 
     @staticmethod
-    def backward(ctx, grad):  # ty: ignore[incompatible-method-override] autograd backward takes one grad per forward output
+    def backward(ctx, grad):  # ty: ignore[incompatible-method-override]
         softmax, local, outside = ctx.saved_tensors
         grad_logits = softmax.mul_(-grad.sum(dim=-1, keepdim=True))
         grad_logits.scatter_add_(-1, local, grad.masked_fill(outside, 0.0))
@@ -56,6 +55,7 @@ def install_multi_target_hooks(tinker_losses, math_utils=None) -> None:
     if math_utils is not None:
         _install_candidate_log_probs(math_utils)
 
+    @same_signature(original_target)
     @wraps(original_target)
     def target_logprobs(args, batch, logits):
         targets = [torch.as_tensor(values) for values in batch["target_tokens"]]
@@ -110,7 +110,7 @@ def install_multi_target_hooks(tinker_losses, math_utils=None) -> None:
             for index, (target, width) in enumerate(zip(targets, widths, strict=True))
         ]
 
-    patch(original_target, owner=tinker_losses)(target_logprobs)
+    tinker_losses._target_logprobs = target_logprobs
     if hasattr(tinker_losses, "_local_response_masks"):
         _install_v012_hooks(tinker_losses)
     else:
@@ -120,6 +120,7 @@ def install_multi_target_hooks(tinker_losses, math_utils=None) -> None:
 def _install_candidate_log_probs(math_utils) -> None:
     original = math_utils.compute_log_probs
 
+    @same_signature(original)
     @wraps(original)
     def compute_log_probs(logits, tokens, process_group, **kwargs):
         if tokens.ndim == 2:
@@ -132,7 +133,7 @@ def _install_candidate_log_probs(math_utils) -> None:
             return CandidateLogProbs.apply(logits, tokens, process_group)
         return original(logits, tokens, process_group, **kwargs)
 
-    patch(original, owner=math_utils)(compute_log_probs)
+    math_utils.compute_log_probs = compute_log_probs
 
 
 def _expand_masks(masks, log_probs):
@@ -145,22 +146,25 @@ def _expand_masks(masks, log_probs):
 def _install_v011_hooks(tinker_losses) -> None:
     original_masks = tinker_losses._response_masks
 
+    @same_signature(original_masks)
     @wraps(original_masks)
     def response_masks(batch, log_probs):
         return _expand_masks(original_masks(batch, log_probs), log_probs)
 
-    patch(original_masks, owner=tinker_losses)(response_masks)
+    tinker_losses._response_masks = response_masks
 
 
 def _install_v012_hooks(tinker_losses) -> None:
     original_masks = tinker_losses._local_response_masks
 
+    @same_signature(original_masks)
     @wraps(original_masks)
     def local_response_masks(args, batch, log_probs):
         return _expand_masks(original_masks(args, batch, log_probs), log_probs)
 
     original_outputs = tinker_losses._gather_per_datum_outputs
 
+    @same_signature(original_outputs)
     @wraps(original_outputs)
     def gather_per_datum_outputs(args, batch, log_probs, per_datum_losses):
         # Miles reassembles 1-D log probabilities across CP ranks; do it per label column.
@@ -196,5 +200,5 @@ def _install_v012_hooks(tinker_losses) -> None:
             )
         ]
 
-    patch(original_masks, owner=tinker_losses)(local_response_masks)
-    patch(original_outputs, owner=tinker_losses)(gather_per_datum_outputs)
+    tinker_losses._local_response_masks = local_response_masks
+    tinker_losses._gather_per_datum_outputs = gather_per_datum_outputs

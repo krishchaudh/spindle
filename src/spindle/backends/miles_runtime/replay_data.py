@@ -8,7 +8,7 @@ from math import prod
 import numpy as np
 
 from spindle.backends.score_centering import has_duplicate_tokens
-from spindle.patching import patch
+from spindle.patching import same_signature
 from spindle.replay import REPLAY_FIELDS
 
 _replay_builder = None
@@ -24,6 +24,7 @@ def install_distribution_sharding(conversion):
     if original is _sharded_package:
         return
 
+    @same_signature(original)
     @wraps(original)
     def package(args, data, partitions):
         shards = original(args, data, partitions)
@@ -36,7 +37,7 @@ def install_distribution_sharding(conversion):
         return shards
 
     _sharded_package = package
-    patch(original, owner=conversion)(package)
+    conversion._package_shards = package
 
 
 def replay_row(inputs, targets: np.ndarray) -> dict:
@@ -239,13 +240,14 @@ def install_bridge_replay(runtime) -> None:
     if original is _replay_builder:
         return
 
+    @same_signature(original)
     def build(slot_datums):
         result = original(slot_datums)
         add_replay_to_train_data(result, [datum for _, datum in slot_datums])
         return result
 
     _replay_builder = build
-    patch(original, owner=runtime)(build)
+    runtime._build_train_data = build
     spec = vars(runtime).get("ROLLOUT_DATA_VALUE_SPEC")
     if (
         isinstance(spec, dict)

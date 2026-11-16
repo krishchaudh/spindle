@@ -9,8 +9,7 @@ Megatron-Bridge accepts pre-sharded rows only with explicit 3D
 from __future__ import annotations
 
 from functools import wraps
-
-from spindle.patching import patch
+from spindle.patching import same_signature
 
 _INSTALLED = "_spindle_cp_position_ids"
 
@@ -21,6 +20,7 @@ def install_qwen3_vl_cp_position_ids(*, bridge_model, miles_qwen3_vl) -> None:
     if getattr(forward, _INSTALLED, False):
         return
 
+    @same_signature(forward)
     @wraps(forward)
     def forward_with_positions(self, *args, **kwargs):
         if kwargs.get("position_ids") is None:
@@ -32,4 +32,4 @@ def install_qwen3_vl_cp_position_ids(*, bridge_model, miles_qwen3_vl) -> None:
         return forward(self, *args, **kwargs)
 
     setattr(forward_with_positions, _INSTALLED, True)
-    patch(forward, owner=model_cls)(forward_with_positions)
+    model_cls.forward = forward_with_positions

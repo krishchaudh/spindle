@@ -8,7 +8,7 @@ from functools import wraps
 import torch
 import torch.nn.functional as F
 
-from spindle.patching import patch
+from spindle.patching import same_signature
 
 ENV_FLAG = "SPINDLE_HOST_SYNC_PATCHES"
 BRIDGE_COMMIT = "8cd3466d14d2337c8492827b3712482c2b3e4866"
@@ -59,23 +59,27 @@ def install_multi_lora(layers=None) -> bool:
     dense, expert = layers.MultiLoRALinear, layers.MultiLoRAGroupedExpertLinear
     init_slot, clear_slot = dense.init_adapter_slot, dense.clear_adapter_slot
 
+    @same_signature(init_slot)
     @wraps(init_slot)
     def init_adapter_slot(self, idx, rank, alpha):
         init_slot(self, idx, rank, alpha)
         scaling = self.alpha_values[idx] / self.rank_values[idx]
         _unit_scaling(self)[idx] = bool(scaling.item() == 1.0)
 
+    @same_signature(clear_slot)
     @wraps(clear_slot)
     def clear_adapter_slot(self, idx):
         clear_slot(self, idx)
         _unit_scaling(self).pop(idx, None)
 
-    patch(init_slot, owner=dense)(init_adapter_slot)
-    patch(clear_slot, owner=dense)(clear_adapter_slot)
-    patch(dense.forward, owner=dense)(_dense_forward(layers))
-    patch(expert.forward, owner=expert)(_expert_forward())
+    dense.init_adapter_slot = init_adapter_slot
+    dense.clear_adapter_slot = clear_adapter_slot
+    dense.forward = same_signature(dense.forward)(_dense_forward(layers))
+    expert.forward = same_signature(expert.forward)(_expert_forward())
     # install_moe_slot_routing looks this up when the model is built.
-    patch(layers._make_slot_routing_hook, owner=layers)(_routing_hook_factory(layers))
+    layers._make_slot_routing_hook = same_signature(layers._make_slot_routing_hook)(
+        _routing_hook_factory(layers)
+    )
     setattr(layers, _INSTALLED, True)
     _log("installed", patch="multi_lora", bridge=BRIDGE_COMMIT[:8])
     return True
@@ -97,12 +101,13 @@ def install_geglu(fused=None, experts=None) -> bool:
     if digest != GEGLU_SOURCE_SHA256:
         _log("skipped", patch="geglu", reason=f"source sha256 {digest[:12]} differs")
         return False
-    patched = _geglu(fused)
-    patch(
-        original,
-        owner=fused,
-        dependents=(experts,) if experts is not None else (),
-    )(patched)
+    patched = same_signature(original)(_geglu(fused))
+    fused.weighted_bias_quick_geglu_impl = patched
+    if (
+        experts is not None
+        and getattr(experts, "weighted_bias_quick_geglu_impl", None) is original
+    ):
+        experts.weighted_bias_quick_geglu_impl = patched
     _log("installed", patch="geglu")
     return True
 

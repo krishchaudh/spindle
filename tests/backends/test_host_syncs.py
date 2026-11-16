@@ -211,14 +211,13 @@ def _fake_layers():
             raise NotImplementedError
 
     class MultiLoRAGroupedExpertLinear(MultiLoRALinear):
-        def forward(self, x):
-            raise NotImplementedError
+        pass
 
     return SimpleNamespace(
         **vars(_layers()),
         MultiLoRALinear=MultiLoRALinear,
         MultiLoRAGroupedExpertLinear=MultiLoRAGroupedExpertLinear,
-        _make_slot_routing_hook=lambda moe_layer, expert_layers: None,
+        _make_slot_routing_hook=None,
     )
 
 

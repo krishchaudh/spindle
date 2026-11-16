@@ -37,7 +37,7 @@ except ImportError:
 
     from . import tinker_cp
 
-from spindle.patching import patch
+from spindle.patching import same_signature
 
 from . import allgather_cp_lora, expert_lora_compat, host_syncs
 from .actor_shared import (
@@ -90,7 +90,7 @@ def _sync_checkpoint_volume(action: str) -> None:
 class SpindleMilesTrainRayActor(ProfiledActor, MultiLoRATrainRayActor):
     """Upstream multi-LoRA actor with Qwen MTP and weights-only save support."""
 
-    def init(self, args, role, **kwargs):  # ty: ignore[incompatible-method-override] ray actor init takes extra role kwargs
+    def init(self, args, role, **kwargs):  # ty: ignore[incompatible-method-override]
         _use_distributed_timeout_for_gloo(args.distributed_timeout_minutes)
         # Miles's LoRA builder inherits checkpoint MTP heads without honoring
         # enable_mtp_training. Qwen3.5 then injects an auxiliary backward loss
@@ -101,13 +101,14 @@ class SpindleMilesTrainRayActor(ProfiledActor, MultiLoRATrainRayActor):
             return result
         original = AutoBridge.to_megatron_provider
 
+        @same_signature(original)
         def provider_without_mtp(bridge, *provider_args, **provider_kwargs):
             provider = original(bridge, *provider_args, **provider_kwargs)
             provider.mtp_num_layers = None
             provider.mtp_hybrid_override_pattern = None
             return provider
 
-        patch(original, owner=AutoBridge)(provider_without_mtp)
+        AutoBridge.to_megatron_provider = provider_without_mtp
         try:
             result = super().init(args, role, **kwargs)
         finally:
@@ -179,8 +180,6 @@ class SpindleMilesTrainRayActor(ProfiledActor, MultiLoRATrainRayActor):
         checkpoint._canonicalize_slot_keys(sharded, slot)
 
         def _save(temporary: Path) -> None:
-            # save returns an AsyncRequest for async checkpointing; spindle waits
-            # on the volume commit below, so the request is intentionally unused.
             dist_checkpointing.save(sharded, str(temporary))
 
         checkpoint_io.write_checkpoint_dir(path, _save)

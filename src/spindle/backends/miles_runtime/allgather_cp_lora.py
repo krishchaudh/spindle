@@ -6,8 +6,7 @@ so the row's adapter gets that chunk's length in tokens.
 from __future__ import annotations
 
 import torch
-
-from spindle.patching import patch
+from spindle.patching import same_signature
 
 
 class _SlotlessIterator:
@@ -31,6 +30,7 @@ def install(megatron_model) -> None:
     if getattr(original, "__spindle_allgather_cp_lora__", False):
         return
 
+    @same_signature(original)
     def get_batch(data_iterator, keys, *args, allgather_cp=False, **kwargs):
         qkv_format = args[1] if len(args) > 1 else kwargs.get("qkv_format", "thd")
         if not (allgather_cp and qkv_format == "bshd"):
@@ -53,4 +53,4 @@ def install(megatron_model) -> None:
         return batch
 
     get_batch.__spindle_allgather_cp_lora__ = True
-    patch(original, owner=megatron_model)(get_batch)
+    megatron_model.get_batch = get_batch
