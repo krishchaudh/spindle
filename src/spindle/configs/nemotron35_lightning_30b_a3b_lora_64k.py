@@ -16,8 +16,8 @@ class Config(Parent):
         "miles_cfg.cli_options.log_probs_chunk_size": 4096,
         "sglang_cfg.max_loras_per_batch": 4,
         "sglang_cfg.max_loaded_loras": 32,
-        # Each request holds five Mamba state slots; size the cache for 128 requests.
         "sglang_cfg.max_mamba_cache_size": 640,
+        "sglang_cfg.mem_fraction_static": 0.9,
     }
 
 
