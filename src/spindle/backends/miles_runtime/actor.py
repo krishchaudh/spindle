@@ -38,6 +38,7 @@ except ImportError:
 from . import (
     allgather_cp_lora,
     expert_lora_compat,
+    gradient_accumulation,
     host_syncs,
     mamba_packing,
     moe_permute,
@@ -62,6 +63,7 @@ except ImportError as error:
 if tinker_cp is not None:
     tinker_cp.install()
 
+gradient_accumulation.install(lora_model)
 install_replay_patches(
     megatron_model=megatron_model,
     lora_model=lora_model,
