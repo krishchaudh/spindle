@@ -180,6 +180,9 @@ def test_pool_starts_native_server_and_correct_sidecar(builders, monkeypatch, ki
             "up_proj",
             "down_proj",
             "lm_head",
+            "in_proj_qkvz",
+            "in_proj_ba",
+            "out_proj",
         ]
     else:
         assert native["weight_update_staging"] == "cpu"
