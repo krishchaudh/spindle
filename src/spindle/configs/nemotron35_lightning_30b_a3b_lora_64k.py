@@ -15,6 +15,7 @@ class Config(Parent):
     overrides = {
         "miles_cfg.expert_model_parallel_size": 1,
         "miles_cfg.max_lora_slots": 4,
+        "miles_cfg.max_tokens_per_gpu": 49152,
         "miles_cfg.cli_options.log_probs_chunk_size": 4096,
         "trainer_env.EXPERT_GROUPED_GEMM": "1",
         "sglang_cfg.max_loras_per_batch": 4,
