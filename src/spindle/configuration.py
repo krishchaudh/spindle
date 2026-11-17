@@ -1,7 +1,6 @@
 """Flat Python recipes. Modal and the backend validate their own options."""
 
 from copy import deepcopy
-import os
 
 
 def _apply_overrides(values, overrides):
@@ -13,17 +12,10 @@ def _apply_overrides(values, overrides):
         target[parts[-1]] = deepcopy(value)
 
 
-def _modal_platform():
-    modal = {"environment": None, "region": None}
-    if os.environ.get("SPINDLE_EXCLUDE_RESERVED_CAPACITY") == "1":
-        modal["exclude_reserved_capacity"] = True
-    return modal
-
-
 class BaseConfig:
     platform = {
         "frontend": "spindle",
-        "modal": _modal_platform(),
+        "modal": {"environment": None, "region": None},
         "secrets": {
             "api": "spindle-api",
             "sampler_proxy": "spindle-proxy",
@@ -62,7 +54,7 @@ class BaseConfig:
     trainer_env = {}
     # A built-in trainer image name or module:attribute; empty uses the default.
     trainer_image = ""
-    # Optional module:attribute for a model-specific sampler image.
+    # A built-in sampler image name or module:attribute; empty uses the default.
     inference_image = ""
     sampler_persistence_concurrency = 8
 
@@ -89,6 +81,11 @@ class BaseConfig:
     inference_scaledown_window_s = 300
     inference_startup_timeout_s = 1200
     inference_env = {}
+    # Optional Hugging Face checkpoint used by SGLang speculative decoding.
+    # It is downloaded alongside the base model and passed as a local path.
+    # NEXTN without a separate draft reuses the target checkpoint.
+    inference_draft_model = ""
+    inference_draft_model_revision = ""
 
     miles_cfg = {}
     megatron_cfg = {}
